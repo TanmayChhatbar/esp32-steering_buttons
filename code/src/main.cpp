@@ -1,57 +1,141 @@
-const int pins[] = {
-    6, 7, 3, 1, 2, 5, 39, 34, // BUT*
-    38, 37, 47, 48,           // BUTD*
-    14, 9, 10,                // ENC1 was originally 8, 9, 10 according to design, but i burnt the solder pad
-    11, 12, 13                // ENC2
-};
-#define NUMPINS (8 + 4 + 3 + 3)
-int lastButtonState[NUMPINS] = {0};
-
 #include <Arduino.h>
+#include <BleGamepad.h> // https://github.com/lemmingDev/ESP32-BLE-Gamepad
+#define ENCODER_DO_NOT_USE_INTERRUPTS
+#include <Encoder.h>
+
+BleGamepad bleGamepad;
+
+// normal buttons
+#define NUM_BUTTONS (1 + 8 + 4 + 2)
+const int pins[] = {
+    6, 6, 7, 3, 1, 2, 5, 39, 34, // BUT* (first is dummy because windows doesnt report this, it seems)
+    38, 37, 47, 48,              // BUTD*
+    10, 13                       // ENC1, ENC2
+};
+
+// encoders
+#define NUM_ENC 2
+const int encPins[] = {
+    14, 9, // ENC1 was originally 8, 9, 10 according to design, but i burnt the solder pad
+    11, 12 // ENC2
+};
+Encoder enc[NUM_ENC] = {
+    Encoder(encPins[0], encPins[1]),
+    Encoder(encPins[2], encPins[3])};
+int previousEncoderPositions[NUM_ENC] = {
+    0, 0};
+int currentEncoderPositions[NUM_ENC] = {
+    0, 0};
+
+// init arrays
+bool previousButtonStates[NUM_BUTTONS + NUM_ENC * 2];
+bool currentButtonStates[NUM_BUTTONS + NUM_ENC * 2];
+
 void setup()
 {
     Serial.begin(115200);
-    for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++)
+
+    // init button pins
+    for (int i = 0; i < NUM_BUTTONS; i++)
     {
         pinMode(pins[i], INPUT_PULLUP);
+        previousButtonStates[i] = HIGH;
+        currentButtonStates[i] = HIGH;
     }
-    pinMode(48, OUTPUT);
+
+    // init enc pins
+    for (int i = 0; i < NUM_ENC * 2; i++)
+    {
+        pinMode(encPins[i], INPUT_PULLUP);
+        previousButtonStates[NUM_BUTTONS + i] = HIGH;
+        currentButtonStates[NUM_BUTTONS + i] = HIGH;
+    }
+
+    // init gamepad
+    BleGamepadConfiguration bleGamepadConfig;
+    bleGamepadConfig.setAutoReport(false);
+    bleGamepadConfig.setButtonCount(NUM_BUTTONS + NUM_ENC * 2);
+    bleGamepad.begin(&bleGamepadConfig);
 }
 
+unsigned long lastReportTime = 0;
+unsigned long lastEncoderChangeTime = 0;
+bool encoderChangeReported = 0;
 void loop()
 {
-    int buttonState[NUMPINS] = {0};
-    bool toPrint = false;
-    for (int i = 0; i < NUMPINS; i++)
+    if (bleGamepad.isConnected())
     {
-        buttonState[i] = digitalRead(pins[i]);
-        if (buttonState[i] != lastButtonState[i])
+        if (millis() - lastReportTime > 20)
         {
-            toPrint = true;
-            lastButtonState[i] = buttonState[i];
+            lastReportTime = millis();
+            encoderChangeReported = 1;
+            // buttons
+            for (int i = 0; i < NUM_BUTTONS; i++)
+            {
+                currentButtonStates[i] = digitalRead(pins[i]);
+
+                if (currentButtonStates[i] != previousButtonStates[i])
+                {
+                    if (currentButtonStates[i] == LOW)
+                    {
+                        bleGamepad.press(i);
+                        Serial.println("Pressed button " + String(i));
+                    }
+                    else
+                    {
+                        bleGamepad.release(i);
+                        Serial.println("Released button " + String(i));
+                    }
+                }
+
+                previousButtonStates[i] = currentButtonStates[i];
+            }
+            bleGamepad.sendReport();
         }
-    }
-    if (toPrint)
-    {
-        for (int i = 0; i < 8; i++)
+
+        // encs
+        // update constantly (cannot use interrupts)
+        for (int i = 0; i < NUM_ENC; i++)
         {
-            Serial.print(buttonState[i]);
+            currentEncoderPositions[i] = enc[i].read() / 4;
         }
-        Serial.print(" ");
-        for (int i = 8; i < 12; i++)
+        if (millis() - lastEncoderChangeTime > 20)
         {
-            Serial.print(buttonState[i]);
+            for (int i = 0; i < NUM_ENC; i++)
+            {
+                if (currentEncoderPositions[i] > previousEncoderPositions[i])
+                {
+                    // if position increased
+                    bleGamepad.press(NUM_BUTTONS - 1 + i * 2);
+                    previousEncoderPositions[i] = currentEncoderPositions[i];
+                    encoderChangeReported = 0;
+                    Serial.println("Encoder " + String(i) + " increased to " + String(currentEncoderPositions[i]));
+                }
+                else if (currentEncoderPositions[i] < previousEncoderPositions[i])
+                {
+                    // if position decreased
+                    bleGamepad.press(NUM_BUTTONS + i * 2);
+                    previousEncoderPositions[i] = currentEncoderPositions[i];
+                    encoderChangeReported = 0;
+                    Serial.println("Encoder " + String(i) + " decreased to " + String(currentEncoderPositions[i]));
+                }
+                else if (encoderChangeReported)
+                {
+                    // if position hasnt changed and last position was registered
+                    if (bleGamepad.isPressed(NUM_BUTTONS - 1 + i * 2))
+                    {
+                        bleGamepad.release(NUM_BUTTONS - 1 + i * 2);
+                        Serial.println("Encoder " + String(i) + " released");
+                    }
+                    if (bleGamepad.isPressed(NUM_BUTTONS + i * 2))
+                    {
+                        bleGamepad.release(NUM_BUTTONS + i * 2);
+                        Serial.println("Encoder " + String(i) + " released");
+                    }
+                }
+                previousEncoderPositions[i] = currentEncoderPositions[i];
+                lastEncoderChangeTime = millis();
+            }
         }
-        Serial.print(" ");
-        for (int i = 12; i < 15; i++)
-        {
-            Serial.print(buttonState[i]);
-        }
-        Serial.print(" ");
-        for (int i = 15; i < sizeof(pins) / sizeof(pins[0]); i++)
-        {
-            Serial.print(buttonState[i]);
-        }
-        Serial.println();
     }
 }
