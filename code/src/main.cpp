@@ -106,7 +106,7 @@ void loop()
                 if (currentEncoderPositions[i] > previousEncoderPositions[i])
                 {
                     // if position increased
-                    bleGamepad.press(NUM_BUTTONS - 1 + i * 2);
+                    bleGamepad.press(NUM_BUTTONS + i * 2);
                     previousEncoderPositions[i] = currentEncoderPositions[i];
                     encoderChangeReported = 0;
                     Serial.println("Encoder " + String(i) + " increased to " + String(currentEncoderPositions[i]));
@@ -114,7 +114,7 @@ void loop()
                 else if (currentEncoderPositions[i] < previousEncoderPositions[i])
                 {
                     // if position decreased
-                    bleGamepad.press(NUM_BUTTONS + i * 2);
+                    bleGamepad.press(NUM_BUTTONS + i * 2 + 1);
                     previousEncoderPositions[i] = currentEncoderPositions[i];
                     encoderChangeReported = 0;
                     Serial.println("Encoder " + String(i) + " decreased to " + String(currentEncoderPositions[i]));
@@ -122,14 +122,14 @@ void loop()
                 else if (encoderChangeReported)
                 {
                     // if position hasnt changed and last position was registered
-                    if (bleGamepad.isPressed(NUM_BUTTONS - 1 + i * 2))
-                    {
-                        bleGamepad.release(NUM_BUTTONS - 1 + i * 2);
-                        Serial.println("Encoder " + String(i) + " released");
-                    }
                     if (bleGamepad.isPressed(NUM_BUTTONS + i * 2))
                     {
                         bleGamepad.release(NUM_BUTTONS + i * 2);
+                        Serial.println("Encoder " + String(i) + " released");
+                    }
+                    if (bleGamepad.isPressed(NUM_BUTTONS + i * 2 + 1))
+                    {
+                        bleGamepad.release(NUM_BUTTONS + i * 2 + 1);
                         Serial.println("Encoder " + String(i) + " released");
                     }
                 }
