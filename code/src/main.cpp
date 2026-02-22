@@ -31,11 +31,13 @@ int currentEncoderPositions[NUM_ENC] = {
 bool previousButtonStates[NUM_BUTTONS + NUM_ENC * 2];
 bool currentButtonStates[NUM_BUTTONS + NUM_ENC * 2];
 
-void setup()
-{
-    Serial.begin(115200);
+// init timers
+unsigned long lastReportTime = 0;
+unsigned long lastEncoderChangeTime = 0;
+bool encoderChangeReported = 0;
 
-    // init button pins
+void initButtonPins()
+{
     for (int i = 0; i < NUM_BUTTONS; i++)
     {
         pinMode(pins[i], INPUT_PULLUP);
@@ -50,6 +52,14 @@ void setup()
         previousButtonStates[NUM_BUTTONS + i] = HIGH;
         currentButtonStates[NUM_BUTTONS + i] = HIGH;
     }
+}
+
+void setup()
+{
+    Serial.begin(115200);
+
+    // init button pins
+    initButtonPins();
 
     // init gamepad
     BleGamepadConfiguration bleGamepadConfig;
@@ -58,9 +68,76 @@ void setup()
     bleGamepad.begin(&bleGamepadConfig);
 }
 
-unsigned long lastReportTime = 0;
-unsigned long lastEncoderChangeTime = 0;
-bool encoderChangeReported = 0;
+void updateButtonStatus()
+{
+    for (int i = 0; i < NUM_BUTTONS; i++)
+    {
+        currentButtonStates[i] = digitalRead(pins[i]);
+
+        if (currentButtonStates[i] != previousButtonStates[i])
+        {
+            if (currentButtonStates[i] == LOW)
+            {
+                bleGamepad.press(i);
+                Serial.println("Pressed button " + String(i));
+            }
+            else
+            {
+                bleGamepad.release(i);
+                Serial.println("Released button " + String(i));
+            }
+        }
+
+        previousButtonStates[i] = currentButtonStates[i];
+    }
+}
+
+void updateEncoderStatus()
+{
+    for (int i = 0; i < NUM_ENC; i++)
+    {
+        currentEncoderPositions[i] = enc[i].read() / 4;
+    }
+    if (millis() - lastEncoderChangeTime > 20)
+    {
+        for (int i = 0; i < NUM_ENC; i++)
+        {
+            if (currentEncoderPositions[i] > previousEncoderPositions[i])
+            {
+                // if position increased
+                bleGamepad.press(NUM_BUTTONS + i * 2);
+                previousEncoderPositions[i] = currentEncoderPositions[i];
+                encoderChangeReported = 0;
+                Serial.println("Encoder " + String(i) + " increased to " + String(currentEncoderPositions[i]));
+            }
+            else if (currentEncoderPositions[i] < previousEncoderPositions[i])
+            {
+                // if position decreased
+                bleGamepad.press(NUM_BUTTONS + i * 2 + 1);
+                previousEncoderPositions[i] = currentEncoderPositions[i];
+                encoderChangeReported = 0;
+                Serial.println("Encoder " + String(i) + " decreased to " + String(currentEncoderPositions[i]));
+            }
+            else if (encoderChangeReported)
+            {
+                // if position hasnt changed and last position was registered
+                if (bleGamepad.isPressed(NUM_BUTTONS + i * 2))
+                {
+                    bleGamepad.release(NUM_BUTTONS + i * 2);
+                    Serial.println("Encoder " + String(i) + " released");
+                }
+                if (bleGamepad.isPressed(NUM_BUTTONS + i * 2 + 1))
+                {
+                    bleGamepad.release(NUM_BUTTONS + i * 2 + 1);
+                    Serial.println("Encoder " + String(i) + " released");
+                }
+            }
+            previousEncoderPositions[i] = currentEncoderPositions[i];
+            lastEncoderChangeTime = millis();
+        }
+    }
+}
+
 void loop()
 {
     if (bleGamepad.isConnected())
@@ -69,73 +146,9 @@ void loop()
         {
             lastReportTime = millis();
             encoderChangeReported = 1;
-            // buttons
-            for (int i = 0; i < NUM_BUTTONS; i++)
-            {
-                currentButtonStates[i] = digitalRead(pins[i]);
-
-                if (currentButtonStates[i] != previousButtonStates[i])
-                {
-                    if (currentButtonStates[i] == LOW)
-                    {
-                        bleGamepad.press(i);
-                        Serial.println("Pressed button " + String(i));
-                    }
-                    else
-                    {
-                        bleGamepad.release(i);
-                        Serial.println("Released button " + String(i));
-                    }
-                }
-
-                previousButtonStates[i] = currentButtonStates[i];
-            }
-            bleGamepad.sendReport();
+            updateButtonStatus();
         }
-
-        // encs
-        // update constantly (cannot use interrupts)
-        for (int i = 0; i < NUM_ENC; i++)
-        {
-            currentEncoderPositions[i] = enc[i].read() / 4;
-        }
-        if (millis() - lastEncoderChangeTime > 20)
-        {
-            for (int i = 0; i < NUM_ENC; i++)
-            {
-                if (currentEncoderPositions[i] > previousEncoderPositions[i])
-                {
-                    // if position increased
-                    bleGamepad.press(NUM_BUTTONS + i * 2);
-                    previousEncoderPositions[i] = currentEncoderPositions[i];
-                    encoderChangeReported = 0;
-                    Serial.println("Encoder " + String(i) + " increased to " + String(currentEncoderPositions[i]));
-                }
-                else if (currentEncoderPositions[i] < previousEncoderPositions[i])
-                {
-                    // if position decreased
-                    bleGamepad.press(NUM_BUTTONS + i * 2 + 1);
-                    previousEncoderPositions[i] = currentEncoderPositions[i];
-                    encoderChangeReported = 0;
-                    Serial.println("Encoder " + String(i) + " decreased to " + String(currentEncoderPositions[i]));
-                }
-                else if (encoderChangeReported)
-                {
-                    // if position hasnt changed and last position was registered
-                    if (bleGamepad.isPressed(NUM_BUTTONS + i * 2))
-                    {
-                        bleGamepad.release(NUM_BUTTONS + i * 2);
-                        Serial.println("Encoder " + String(i) + " released");
-                    }
-                    if (bleGamepad.isPressed(NUM_BUTTONS + i * 2 + 1))
-                    {
-                        bleGamepad.release(NUM_BUTTONS + i * 2 + 1);
-                        Serial.println("Encoder " + String(i) + " released");
-                    }
-                }
-                previousEncoderPositions[i] = currentEncoderPositions[i];
-                lastEncoderChangeTime = millis();
-            }
-        }
+        bleGamepad.sendReport();
     }
+    updateEncoderStatus(); // out of the loop to keep quicker updates
 }
