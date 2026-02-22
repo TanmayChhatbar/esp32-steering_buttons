@@ -2,7 +2,9 @@
 #include <BleGamepad.h> // https://github.com/lemmingDev/ESP32-BLE-Gamepad
 #define ENCODER_DO_NOT_USE_INTERRUPTS
 #include <Encoder.h>
-
+#include <WiFi.h>
+#include <ArduinoOTA.h>
+#include "credentials.h"
 BleGamepad bleGamepad;
 
 // normal buttons
@@ -36,6 +38,9 @@ unsigned long lastReportTime = 0;
 unsigned long lastEncoderChangeTime = 0;
 bool encoderChangeReported = 0;
 
+// OTA
+bool OTAMode = false;
+
 void initButtonPins()
 {
     for (int i = 0; i < NUM_BUTTONS; i++)
@@ -61,11 +66,28 @@ void setup()
     // init button pins
     initButtonPins();
 
-    // init gamepad
-    BleGamepadConfiguration bleGamepadConfig;
-    bleGamepadConfig.setAutoReport(false);
-    bleGamepadConfig.setButtonCount(NUM_BUTTONS + NUM_ENC * 2);
-    bleGamepad.begin(&bleGamepadConfig);
+    if (!digitalRead(pins[7]) && !digitalRead(pins[8]))
+    {
+        WiFi.begin(ssid, password);
+        while (WiFi.waitForConnectResult() != WL_CONNECTED)
+        {
+            delay(5000);
+            ESP.restart();
+        }
+        Serial.println("OTA Mode");
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.localIP());
+        ArduinoOTA.begin(); // Starts OTA
+        OTAMode = true;
+    }
+    else
+    {
+        // init gamepad
+        BleGamepadConfiguration bleGamepadConfig;
+        bleGamepadConfig.setAutoReport(false);
+        bleGamepadConfig.setButtonCount(NUM_BUTTONS + NUM_ENC * 2);
+        bleGamepad.begin(&bleGamepadConfig);
+    }
 }
 
 void updateButtonStatus()
@@ -140,15 +162,22 @@ void updateEncoderStatus()
 
 void loop()
 {
-    if (bleGamepad.isConnected())
+    if (OTAMode)
     {
-        if (millis() - lastReportTime > 20)
-        {
-            lastReportTime = millis();
-            encoderChangeReported = 1;
-            updateButtonStatus();
-        }
-        bleGamepad.sendReport();
+        ArduinoOTA.handle();
     }
-    updateEncoderStatus(); // out of the loop to keep quicker updates
+    else
+    {
+        if (bleGamepad.isConnected())
+        {
+            if (millis() - lastReportTime > 20)
+            {
+                lastReportTime = millis();
+                encoderChangeReported = 1;
+                updateButtonStatus();
+            }
+            bleGamepad.sendReport();
+        }
+        updateEncoderStatus(); // out of the loop to keep quicker updates
+    }
 }
