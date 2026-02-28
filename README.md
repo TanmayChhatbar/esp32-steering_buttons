@@ -1,7 +1,7 @@
 
 # ESP32 Steering Buttons
 
-![Demo Video](media/steering-4k-net.mp4)
+[![Demo Video](media/steering.jpg)](media/steering-4k-net.mp4)
 
 ## What you will need
 
