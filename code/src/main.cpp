@@ -47,6 +47,22 @@ bool encoderChangeReported = 0;
 // OTA
 bool OTAMode = false;
 
+void blinkLEDs()
+{
+    static unsigned long last_led_update_time = 0;
+    bool is_off = (leds[0] == CRGB::Black);
+    unsigned long current_time = millis();
+    if (current_time - last_led_update_time > 500)
+    {
+        for (int i = 0; i < NUM_LEDS; i++)
+        {
+            leds[i] = is_off ? CRGB::Yellow : CRGB::Black;
+        }
+        FastLED.show();
+        last_led_update_time = current_time;
+    }
+}
+
 void initButtonPins()
 {
     for (int i = 0; i < NUM_BUTTONS; i++)
@@ -70,20 +86,27 @@ void setup()
     Serial.begin(115200);
 
     // init led
-    FastLED.addLeds<WS2812, LED_PIN>(leds, NUM_LEDS);
+    FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS);
     FastLED.setDither(DISABLE_DITHER);
     FastLED.setBrightness(64);
-    
+
     // init button pins
     initButtonPins();
 
     if (!digitalRead(pins[7]) && !digitalRead(pins[8]))
     {
+        blinkLEDs();
         WiFi.begin(ssid, password);
+        unsigned long long start_attempt_time = millis();
         while (WiFi.waitForConnectResult() != WL_CONNECTED)
         {
-            delay(5000);
-            ESP.restart();
+            blinkLEDs();
+            if (millis() - start_attempt_time > 5000)
+            {
+                Serial.println("Failed to connect to WiFi. Restarting...");
+                ESP.restart();
+            }
+            delay(100);
         }
         Serial.println("OTA Mode");
         Serial.print("IP Address: ");
@@ -97,6 +120,10 @@ void setup()
         BleGamepadConfiguration bleGamepadConfig;
         bleGamepadConfig.setAutoReport(false);
         bleGamepadConfig.setButtonCount(NUM_BUTTONS + NUM_ENC * 2);
+
+        // for feedback
+        bleGamepadConfig.setEnableOutputReport(true);
+
         bleGamepad.begin(&bleGamepadConfig);
     }
 }
@@ -171,39 +198,70 @@ void updateEncoderStatus()
     }
 }
 
-void updateLEDs()
+void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
 {
-    static unsigned long last_led_update_time = 0;
-    unsigned long current_time = millis();
-    if (current_time - last_led_update_time > 0)
-    {
-        for (int i = 0; i < NUM_LEDS; i++)
-        {
-            leds[i] = CHSV((current_time / 50 + i * 10) % 255, 255, 255);
-        }
-        FastLED.show();
-        last_led_update_time = current_time;
-    }
-}
+    const bool symmetric = true;
+    const int num_leds = NUM_LEDS / (symmetric ? 2 : 1);
+    const CRGB colors[num_leds] = {CRGB::Green, CRGB::Green, CRGB::Yellow, CRGB::Red, CRGB::Red};
+    const float trigger_ratios[num_leds] = {0.000001, 0.4, 0.6, 0.7, 0.8};
+    const float flicker_ratio = 0.91f;
+    const float all_blue_ratio = 0.9f;
+    static unsigned long long last_flicker_time = 0;
+    unsigned long long current_time = millis();
+    float rpm_ratio = max_rpm ? (float)rpm / (float)max_rpm : 0.0f;
 
-void blinkLEDs()
-{
-    static unsigned long last_led_update_time = 0;
-    bool is_off = (leds[0] == CRGB::Black);
-    unsigned long current_time = millis();
-    if (current_time - last_led_update_time > 500)
+    // engine on light
+    for (int i = 0; i < num_leds; i++)
     {
-        for (int i = 0; i < NUM_LEDS; i++)
+        if (rpm_ratio > all_blue_ratio)
         {
-            leds[i] = is_off ? CRGB::Yellow : CRGB::Black;
+            leds[i] = CRGB::Blue;
         }
-        FastLED.show();
-        last_led_update_time = current_time;
+        else
+        {
+            leds[i] = (rpm_ratio > trigger_ratios[i]) ? colors[i] : CRGB::Black;
+        }
     }
+
+    // flicker at redline
+    static bool flicker_on = true;
+    if (rpm_ratio > flicker_ratio)
+    {
+        if (current_time - last_flicker_time >= 200)
+        {
+            flicker_on = !flicker_on;
+            last_flicker_time = current_time;
+        }
+
+        if (!flicker_on)
+        {
+            for (int i = 0; i < num_leds; i++)
+            {
+                leds[i] = CRGB::Black;
+            }
+        }
+    }
+    else
+    {
+        flicker_on = true;
+        last_flicker_time = current_time;
+    }
+
+    // mirror
+    if (symmetric)
+    {
+        for (int i = 0; i < num_leds; i++)
+        {
+            leds[NUM_LEDS - 1 - i] = leds[i];
+        }
+    }
+    FastLED.show();
 }
 
 void loop()
 {
+    static unsigned long long ota_request_time = 0;
+    unsigned long long current_time = millis();
     if (OTAMode)
     {
         ArduinoOTA.handle();
@@ -213,15 +271,36 @@ void loop()
     {
         if (bleGamepad.isConnected())
         {
-            if (millis() - lastReportTime > 20)
+            if (current_time - lastReportTime > 20)
             {
-                lastReportTime = millis();
+                lastReportTime = current_time;
                 encoderChangeReported = 1;
                 updateButtonStatus();
             }
             bleGamepad.sendReport();
+
+            // feedback
+            if (bleGamepad.isOutputReceived())
+            {
+                uint8_t *buffer = bleGamepad.getOutputBuffer();
+
+                int rpm = (buffer[0] << 8) | buffer[1];
+                int max_rpm = (buffer[2] << 8) | buffer[3];
+
+                updateLEDs_RPM(rpm, max_rpm);
+            }
         }
         updateEncoderStatus(); // out of the loop to keep quicker updates
-        updateLEDs();
+
+        // go to OTA mode
+        if (currentButtonStates[7] || currentButtonStates[8])
+        {
+            ota_request_time = current_time; // reset timer if either of the buttons is unpressed
+        }
+        if (current_time - ota_request_time > 3000)
+        {
+            Serial.println("OTA Mode requested. Restarting...");
+            ESP.restart();
+        }
     }
 }

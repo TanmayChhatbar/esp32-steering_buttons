@@ -1,62 +1,29 @@
-﻿import ctypes
-import time
-from ctypes import wintypes
-
-
-class Physics(ctypes.Structure):
-    _pack_ = 4
-    _fields_ = [
-        ("packet_id", ctypes.c_int32),
-        ("gas", ctypes.c_float),
-        ("brake", ctypes.c_float),
-        ("fuel", ctypes.c_float),
-        ("gear", ctypes.c_int32),
-        ("rpm", ctypes.c_int32),
-    ]
-
-
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-kernel32.OpenFileMappingW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
-kernel32.OpenFileMappingW.restype = wintypes.HANDLE
-kernel32.MapViewOfFile.argtypes = [
-    wintypes.HANDLE,
-    wintypes.DWORD,
-    wintypes.DWORD,
-    wintypes.DWORD,
-    ctypes.c_size_t,
-]
-kernel32.MapViewOfFile.restype = ctypes.c_void_p
-kernel32.UnmapViewOfFile.argtypes = [ctypes.c_void_p]
-kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-FILE_MAP_READ = 0x0004
-MAPPING_NAME = "Local\\acpmf_physics"
+from utils_ble import *
+from utils_ac import *
 
 
 def main():
-    handle = kernel32.OpenFileMappingW(FILE_MAP_READ, False, MAPPING_NAME)
-    if not handle:
-        raise ctypes.WinError(ctypes.get_last_error())
-
-    view = kernel32.MapViewOfFile(handle, FILE_MAP_READ, 0, 0, ctypes.sizeof(Physics))
-    if not view:
-        error = ctypes.get_last_error()
-        kernel32.CloseHandle(handle)
-        raise ctypes.WinError(error)
-
+    _, view, static_handle, static_view = open_mappings()
+    gamepad = open_gamepad()
     try:
+        print("Sending RPM and max RPM")
         while True:
-            data = Physics.from_buffer_copy(
-                ctypes.string_at(view, ctypes.sizeof(Physics))
-            )
-            print(f"\rRPM: {data.rpm}")
-            time.sleep(1 / 30)  # approx 30 hz
+            data = read_mapping(view, Physics)
+            static = read_mapping(static_view, StaticInfo)
+            rpm = max(0, min(data.rpm, 65535))
+            max_rpm = max(0, min(static.max_rpm, 65535))
 
-    except KeyboardInterrupt:
-        print("\nStopped.")
+            # hID writes include the report ID and the full report body.
+            sendPayload(rpm, max_rpm, gamepad)
+            time.sleep(UPDATE_INTERVAL)
     finally:
-        kernel32.UnmapViewOfFile(view)
-        kernel32.CloseHandle(handle)
+        gamepad.close()
+        kernel32.UnmapViewOfFile(static_view)
+        kernel32.CloseHandle(static_handle)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nStopped.")
