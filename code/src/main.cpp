@@ -4,6 +4,7 @@
 #include <Encoder.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
+#include <FastLED.h>
 #include "credentials.h"
 BleGamepad bleGamepad;
 
@@ -28,6 +29,11 @@ int previousEncoderPositions[NUM_ENC] = {
     0, 0};
 int currentEncoderPositions[NUM_ENC] = {
     0, 0};
+
+// leds
+#define LED_PIN 4
+#define NUM_LEDS 10
+CRGB leds[NUM_LEDS];
 
 // init arrays
 bool previousButtonStates[NUM_BUTTONS + NUM_ENC * 2];
@@ -63,6 +69,11 @@ void setup()
 {
     Serial.begin(115200);
 
+    // init led
+    FastLED.addLeds<WS2812, LED_PIN>(leds, NUM_LEDS);
+    FastLED.setDither(DISABLE_DITHER);
+    FastLED.setBrightness(64);
+    
     // init button pins
     initButtonPins();
 
@@ -160,11 +171,43 @@ void updateEncoderStatus()
     }
 }
 
+void updateLEDs()
+{
+    static unsigned long last_led_update_time = 0;
+    unsigned long current_time = millis();
+    if (current_time - last_led_update_time > 0)
+    {
+        for (int i = 0; i < NUM_LEDS; i++)
+        {
+            leds[i] = CHSV((current_time / 50 + i * 10) % 255, 255, 255);
+        }
+        FastLED.show();
+        last_led_update_time = current_time;
+    }
+}
+
+void blinkLEDs()
+{
+    static unsigned long last_led_update_time = 0;
+    bool is_off = (leds[0] == CRGB::Black);
+    unsigned long current_time = millis();
+    if (current_time - last_led_update_time > 500)
+    {
+        for (int i = 0; i < NUM_LEDS; i++)
+        {
+            leds[i] = is_off ? CRGB::Yellow : CRGB::Black;
+        }
+        FastLED.show();
+        last_led_update_time = current_time;
+    }
+}
+
 void loop()
 {
     if (OTAMode)
     {
         ArduinoOTA.handle();
+        blinkLEDs();
     }
     else
     {
@@ -179,5 +222,6 @@ void loop()
             bleGamepad.sendReport();
         }
         updateEncoderStatus(); // out of the loop to keep quicker updates
+        updateLEDs();
     }
 }
