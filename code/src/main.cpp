@@ -203,9 +203,12 @@ void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
     const bool symmetric = true;
     const int num_leds = NUM_LEDS / (symmetric ? 2 : 1);
     const CRGB colors[num_leds] = {CRGB::Green, CRGB::Green, CRGB::Yellow, CRGB::Red, CRGB::Red};
-    const float trigger_ratios[num_leds] = {0.000001, 0.4, 0.6, 0.7, 0.8};
-    const float flicker_ratio = 0.91f;
+    const float trigger_ratios[num_leds] = {0.2, 0.4, 0.6, 0.7, 0.8};
     const float all_blue_ratio = 0.9f;
+    const float flicker_ratio = 0.91f;
+    const float flicker_ratio2 = 0.925f;
+    const bool smooth_transition = true;
+
     static unsigned long long last_flicker_time = 0;
     unsigned long long current_time = millis();
     float rpm_ratio = max_rpm ? (float)rpm / (float)max_rpm : 0.0f;
@@ -219,7 +222,37 @@ void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
         }
         else
         {
-            leds[i] = (rpm_ratio > trigger_ratios[i]) ? colors[i] : CRGB::Black;
+            if (smooth_transition)
+            {
+                if (rpm_ratio > trigger_ratios[i])
+                {
+                    leds[i] = (rpm_ratio > trigger_ratios[i]) ? colors[i] : CRGB::Black;
+                }
+                else if (i > 0 && rpm_ratio > trigger_ratios[i - 1])
+                {
+                    float ratio = (rpm_ratio - trigger_ratios[i - 1]) / (trigger_ratios[i] - trigger_ratios[i - 1]);
+                    leds[i] = colors[i];
+                    leds[i].r = leds[i].r * ratio;
+                    leds[i].g = leds[i].g * ratio;
+                    leds[i].b = leds[i].b * ratio;
+                }
+                else if (i == 0)
+                {
+                    float ratio = (rpm_ratio / trigger_ratios[i]);
+                    leds[i] = colors[i];
+                    leds[i].r = leds[i].r * ratio;
+                    leds[i].g = leds[i].g * ratio;
+                    leds[i].b = leds[i].b * ratio;
+                }
+                else
+                {
+                    leds[i] = CRGB::Black;
+                }
+            }
+            else
+            {
+                leds[i] = (rpm_ratio > trigger_ratios[i]) ? colors[i] : CRGB::Black;
+            }
         }
     }
 
@@ -227,7 +260,7 @@ void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
     static bool flicker_on = true;
     if (rpm_ratio > flicker_ratio)
     {
-        if (current_time - last_flicker_time >= 200)
+        if (current_time - last_flicker_time >= 200 || (current_time - last_flicker_time >= 100 && rpm_ratio > flicker_ratio2))
         {
             flicker_on = !flicker_on;
             last_flicker_time = current_time;
@@ -261,6 +294,7 @@ void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
 void loop()
 {
     static unsigned long long ota_request_time = 0;
+    static unsigned long long ouput_received_time = 0;
     unsigned long long current_time = millis();
     if (OTAMode)
     {
@@ -288,9 +322,20 @@ void loop()
                 int max_rpm = (buffer[2] << 8) | buffer[3];
 
                 updateLEDs_RPM(rpm, max_rpm);
+                ouput_received_time = current_time;
             }
         }
         updateEncoderStatus(); // out of the loop to keep quicker updates
+
+        // if no output received for 5 seconds, turn off leds
+        if (current_time - ouput_received_time > 5000)
+        {
+            for (int i = 0; i < NUM_LEDS; i++)
+            {
+                leds[i] = CRGB::Black;
+            }
+            FastLED.show();
+        }
 
         // go to OTA mode
         if (currentButtonStates[7] || currentButtonStates[8])
