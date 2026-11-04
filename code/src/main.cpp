@@ -198,22 +198,77 @@ void updateEncoderStatus()
     }
 }
 
+// config for leds
+#define LEDS_SYMMETRIC false
+#define LEDS_SMOOTH_TRANSITION true
+#define LEDS_ALL_SAME false
+
+#if LEDS_ALL_SAME
+CRGB blendColors(const int *color_hues, const float *trigger_ratios, int num_colors, float rpm_ratio)
+{
+    // if at the last color, return it
+    if (rpm_ratio >= trigger_ratios[num_colors - 1])
+    {
+        return CHSV(color_hues[num_colors - 1], 255, 255);
+    }
+
+    // find the indices of the two colors to blend between
+    unsigned int i_plus = 0;
+    for (i_plus = 0; i_plus < num_colors; i_plus++)
+    {
+        if (rpm_ratio < trigger_ratios[i_plus])
+        {
+            break;
+        }
+    }
+    if (i_plus == 0)
+    {
+        CRGB color = CHSV(color_hues[0], 255, 255);
+        float ratio = rpm_ratio / trigger_ratios[0];
+        color.r = color.r * ratio;
+        color.g = color.g * ratio;
+        color.b = color.b * ratio;
+        return color;
+    }
+    else
+    {
+        float ratio = (rpm_ratio - trigger_ratios[i_plus - 1]) / (trigger_ratios[i_plus] - trigger_ratios[i_plus - 1]);
+        CRGB color = CHSV((color_hues[i_plus - 1] + int((color_hues[i_plus] - color_hues[i_plus - 1]) * ratio)), 255, 255);
+        return color;
+    }
+}
+#endif
+
 void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
 {
-    const bool symmetric = true;
-    const int num_leds = NUM_LEDS / (symmetric ? 2 : 1);
-    const CRGB colors[num_leds] = {CRGB::Green, CRGB::Green, CRGB::Yellow, CRGB::Red, CRGB::Red};
-    const float trigger_ratios[num_leds] = {0.2, 0.4, 0.6, 0.7, 0.8};
+    // common config
     const float all_blue_ratio = 0.9f;
     const float flicker_ratio = 0.91f;
     const float flicker_ratio2 = 0.925f;
-    const bool smooth_transition = true;
 
+    // var init
     static unsigned long long last_flicker_time = 0;
     unsigned long long current_time = millis();
-    float rpm_ratio = max_rpm ? (float)rpm / (float)max_rpm : 0.0f;
+    float rpm_ratio = max((float)(rpm - 900) / (float)(max_rpm - 900), 0.0f);
+    CRGB same_color = CRGB::Black;
 
-    // engine on light
+#if LEDS_ALL_SAME
+    const int num_leds = NUM_LEDS;
+    const int color_hues[3] = {HUE_GREEN, HUE_YELLOW, HUE_RED};
+    const float trigger_ratios[3] = {0.2, 0.3, 0.8};
+    same_color = blendColors(color_hues, trigger_ratios, sizeof(color_hues) / sizeof(color_hues[0]), rpm_ratio);
+#else
+#if LEDS_SYMMETRIC
+    const int num_leds = NUM_LEDS / (LEDS_SYMMETRIC ? 2 : 1);
+    const CRGB colors[num_leds] = {CRGB::Green, CRGB::Green, CRGB::Yellow, CRGB::Red, CRGB::Red};
+    const float trigger_ratios[num_leds] = {0.2, 0.4, 0.6, 0.7, 0.8};
+#else
+    const int num_leds = NUM_LEDS;
+    const CRGB colors[num_leds] = {CRGB::Green, CRGB::Green, CRGB::Yellow, CRGB::Yellow, CRGB::Yellow, CRGB::Yellow, CRGB::Yellow, CRGB::Yellow, CRGB::Red, CRGB::Red};
+    const float trigger_ratios[num_leds] = {0.2, 0.3, 0.4, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8};
+#endif
+#endif
+
     for (int i = 0; i < num_leds; i++)
     {
         if (rpm_ratio > all_blue_ratio)
@@ -222,7 +277,8 @@ void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
         }
         else
         {
-            if (smooth_transition)
+#if !LEDS_ALL_SAME
+            if (LEDS_SMOOTH_TRANSITION)
             {
                 if (rpm_ratio > trigger_ratios[i])
                 {
@@ -253,6 +309,11 @@ void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
             {
                 leds[i] = (rpm_ratio > trigger_ratios[i]) ? colors[i] : CRGB::Black;
             }
+#else
+            {
+                leds[i] = same_color;
+            }
+#endif
         }
     }
 
@@ -281,13 +342,15 @@ void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
     }
 
     // mirror
-    if (symmetric)
+#if !LEDS_ALL_SAME
+    if (LEDS_SYMMETRIC)
     {
         for (int i = 0; i < num_leds; i++)
         {
             leds[NUM_LEDS - 1 - i] = leds[i];
         }
     }
+#endif
     FastLED.show();
 }
 
