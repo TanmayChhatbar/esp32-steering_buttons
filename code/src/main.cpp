@@ -88,7 +88,7 @@ void setup()
     // init led
     FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS);
     FastLED.setDither(DISABLE_DITHER);
-    FastLED.setBrightness(64);
+    FastLED.setBrightness(32);
 
     // init button pins
     initButtonPins();
@@ -255,17 +255,17 @@ void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
 #if LEDS_ALL_SAME
     const int num_leds = NUM_LEDS;
     const int color_hues[3] = {HUE_GREEN, HUE_YELLOW, HUE_RED};
-    const float trigger_ratios[3] = {0.2, 0.3, 0.8};
+    const float trigger_ratios[3] = {0.5, 0.675, 0.833};
     same_color = blendColors(color_hues, trigger_ratios, sizeof(color_hues) / sizeof(color_hues[0]), rpm_ratio);
 #else
 #if LEDS_SYMMETRIC
     const int num_leds = NUM_LEDS / (LEDS_SYMMETRIC ? 2 : 1);
     const CRGB colors[num_leds] = {CRGB::Green, CRGB::Green, CRGB::Yellow, CRGB::Red, CRGB::Red};
-    const float trigger_ratios[num_leds] = {0.2, 0.4, 0.6, 0.7, 0.8};
+    const float trigger_ratios[num_leds] = {0.5, 0.6, 0.675, 0.75, 0.833};
 #else
     const int num_leds = NUM_LEDS;
     const CRGB colors[num_leds] = {CRGB::Green, CRGB::Green, CRGB::Yellow, CRGB::Yellow, CRGB::Yellow, CRGB::Yellow, CRGB::Yellow, CRGB::Yellow, CRGB::Red, CRGB::Red};
-    const float trigger_ratios[num_leds] = {0.2, 0.3, 0.4, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8};
+    const float trigger_ratios[num_leds] = {0.5, 0.55, 0.6, 0.633, 0.667, 0.7, 0.733, 0.767, 0.8, 0.833};
 #endif
 #endif
 
@@ -296,9 +296,9 @@ void updateLEDs_RPM(unsigned int rpm, unsigned int max_rpm)
                 {
                     float ratio = (rpm_ratio / trigger_ratios[i]);
                     leds[i] = colors[i];
-                    leds[i].r = leds[i].r * ratio;
-                    leds[i].g = leds[i].g * ratio;
-                    leds[i].b = leds[i].b * ratio;
+                    leds[i].r = leds[i].r * ratio * ratio;
+                    leds[i].g = leds[i].g * ratio * ratio;
+                    leds[i].b = leds[i].b * ratio * ratio;
                 }
                 else
                 {
