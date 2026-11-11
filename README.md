@@ -16,5 +16,3 @@
 This repository is more a demo than a guide for DIY wheel buttons for an ESP32.
 
 It uses the lemmingdev/ESP32-BLE-Gamepad library to handle the joystick control component.
-
-LED is WIP.
